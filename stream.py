@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 
 # Backend URL (Update if running on a server)
-BASE_URL = "http://10.50.85.123:8080"
+BASE_URL = "https://ainew-371840213392.us-central1.run.app"
 
 # 🌟 1️⃣ Organization Input
 st.title("Multi-Tenant Document RAG System")
