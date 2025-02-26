@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 
 # Backend URL (Update if running on a server)
-BASE_URL = "https://ainew-371840213392.us-central1.run.app"
+BASE_URL = "http://10.50.91.145:8080"
 
 # 🌟 1️⃣ Organization Input
 st.title("Multi-Tenant Document RAG System")
@@ -18,7 +18,7 @@ st.sidebar.success(f"Using Organization: **{org_id}**")
 
 # 🌟 2️⃣ File Upload Section
 st.header("📂 Upload Documents")
-uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf","txt","docx","json"])
+uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf","txt","docx","json","csv"])
 
 if uploaded_file:
     with st.spinner("Uploading and processing file..."):

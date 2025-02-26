@@ -12,7 +12,7 @@ pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 pinecone_index = pc.Index(os.getenv("PINECONE_INDEX_NAME"))
 
 # Query Pinecone to fetch an embedding
-query_response = pinecone_index.fetch(["Exercises Routine_chunk_1"])  # Use a stored ID from your data
+query_response = pinecone_index.fetch(["healthcare_dataset_1"])  # Use a stored ID from your data
 
 # Print the vector (embedding)
 print(query_response)
