@@ -10,6 +10,9 @@ import pandas as pd
 import json 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from flask_cors import CORS
+import tiktoken
+import csv
+
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +42,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 
 @app.route("/")
+
 def home():
     return "Multi-Tenant File Upload and Embedding API is Running"
 
@@ -84,43 +88,87 @@ def extract_text_from_file(file_path, file_type):
             except json.JSONDecodeError:
                 f.seek(0)
                 text = f.read()
+    elif file_type == "csv":
+        try:
+            text_lines = []
+            for chunk in pd.read_csv(file_path, chunksize=1000, encoding="utf-8"):
+                for row in chunk.itertuples(index=False):
+                    text_lines.append(" | ".join(map(str, row)))
+                    if len(text_lines) >= 100000:
+                        break
+            text = "\n".join(text_lines)
+            if not text.strip():
+                raise ValueError("Extracted text from CSV is empty.")
+        except Exception as e:
+            text = f"Error processing CSV: {str(e)}"
     
     return text
 
+
+# text to be embedded in Pinecone
+# Embed Text in Pinecone
 # Generate OpenAI Embeddings
 def generate_openai_embeddings(text_chunks):
-    """
-    Generate embeddings for text chunks using OpenAI's text-embedding-ada-002.
-    """
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)  # New OpenAI Client
+    """Generate embeddings in batches, ensuring each chunk is <= 8192 tokens."""
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    response = client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=text_chunks
-    )
+    embeddings = []
+    batch_size = 50
+    filtered_chunks = [chunk for chunk in text_chunks if len(tokenizer.encode(chunk)) <= 8192]
 
-    return [embedding.embedding for embedding in response.data]
+    if not filtered_chunks:
+        print("⚠️ No valid text to embed. Skipping OpenAI call.")
+        return []
 
+    try:
+        for i in range(0, len(filtered_chunks), batch_size):
+            batch = filtered_chunks[i : i + batch_size]
+            response = client.embeddings.create(model="text-embedding-ada-002", input=batch)
+            embeddings.extend([embedding.embedding for embedding in response.data])
+    except openai.BadRequestError as e:
+        print(f"❌ OpenAI Embeddings API Error: {e}")
+    except Exception as e:
+        print(f"⚠️ Unexpected OpenAI Error: {e}")
+
+    return embeddings
+
+#module to process text and store embeddings in Pinecone
 # Process Text and Store Embeddings in Pinecone
 def process_text_and_store_embeddings(text, org_id, doc_id):
-    """
-    Chunks text, generates embeddings using OpenAI, and stores them in Pinecone.
-    """
-    chunks = text_splitter.split_text(text)
-    embeddings = generate_openai_embeddings(chunks)
+    """Chunks text, generates embeddings in batches, and stores them in Pinecone."""
+    tokenizer = tiktoken.get_encoding("cl100k_base")
+    batch_size = 50
+    valid_chunks = [chunk for chunk in text_splitter.split_text(text) if len(tokenizer.encode(chunk)) <= 8192]
 
-    pinecone_vectors = [
-        {
-            "id": f"{doc_id}_chunk_{i}",
-            "values": embeddings[i],
-            "metadata": {"org_id": org_id, "text": chunks[i]}
-        }
-        for i in range(len(chunks))
-    ]
+    print(f"✅ Processing {len(valid_chunks)} valid chunks for embedding.")
+    total_uploaded = 0
 
-    pinecone_index.upsert(vectors=pinecone_vectors)
-    return len(chunks)
+    for i in range(0, len(valid_chunks), batch_size):
+        batch_chunks = valid_chunks[i : i + batch_size]
+        batch_embeddings = generate_openai_embeddings(batch_chunks)
 
+        if not batch_embeddings:
+            print("⚠️ Skipping batch due to empty embeddings.")
+            continue
+
+        pinecone_vectors = [
+            {"id": f"{doc_id}_chunk_{i+j}", "values": batch_embeddings[j], "metadata": {"org_id": org_id, "text": batch_chunks[j]}}
+            for j in range(len(batch_embeddings))
+        ]
+
+        if pinecone_vectors:
+            try:
+                pinecone_index.upsert(vectors=pinecone_vectors)
+                total_uploaded += len(batch_embeddings)
+            except Exception as e:
+                print(f"❌ Pinecone Batch Upload Error: {str(e)}")
+
+    print(f"✅ Successfully uploaded {total_uploaded} chunks to Pinecone.")
+    return total_uploaded
+
+
+# routes for the project 
 # Flask API for File Upload
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -133,7 +181,7 @@ def upload_file():
     file = request.files["file"]
     org_id = request.form["org_id"]
     file_ext = file.filename.split(".")[-1].lower()  # Extract file extension
-    allowed_types = ["pdf", "docx", "txt", "json"]
+    allowed_types = ["pdf", "docx", "txt", "json","csv"]  # Add more types if needed
 
     if file_ext not in allowed_types:
         return jsonify({"error": "Unsupported file type!"}), 400

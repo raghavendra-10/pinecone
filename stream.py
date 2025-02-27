@@ -18,7 +18,7 @@ st.sidebar.success(f"Using Organization: **{org_id}**")
 
 # 🌟 2️⃣ File Upload Section
 st.header("📂 Upload Documents")
-uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf","txt","docx","json"])
+uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf","txt","docx","json","csv"])
 
 if uploaded_file:
     with st.spinner("Uploading and processing file..."):
